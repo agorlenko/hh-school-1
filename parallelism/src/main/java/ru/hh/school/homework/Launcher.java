@@ -1,23 +1,18 @@
 package ru.hh.school.homework;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.nio.file.*;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.stream.Stream;
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
-import static java.util.Collections.reverseOrder;
-import static java.util.Map.Entry.comparingByValue;
-import static java.util.function.Function.identity;
-import static java.util.stream.Collectors.counting;
-import static java.util.stream.Collectors.groupingBy;
-import static java.util.stream.Collectors.toMap;
+
+import org.slf4j.Logger;
+import static org.slf4j.LoggerFactory.getLogger;
 
 public class Launcher {
 
-  public static void main(String[] args) throws IOException {
+  private static final Logger LOGGER = getLogger(Launcher.class);
+
+
+  public static void main(String[] args) {
     // Написать код, который, как можно более параллельно:
     // - по заданному пути найдет все "*.java" файлы
     // - для каждого файла вычислит 10 самых популярных слов (см. #naiveCount())
@@ -38,44 +33,45 @@ public class Launcher {
     // При желании naiveSearch и naiveCount можно оптимизировать.
 
     // test our naive methods:
-    testCount();
-    testSearch();
-  }
+    // testCount();
+    // testSearch();
 
-  private static void testCount() {
-    Path path = Path.of("d:\\projects\\hh-school\\parallelism\\src\\main\\java\\ru\\hh\\school\\parallelism\\Runner.java");
-    System.out.println(naiveCount(path));
-  }
+    Map<String, String> parameters = new HashMap<>();
 
-  private static Map<String, Long> naiveCount(Path path) {
-    try {
-      return Files.lines(path)
-        .flatMap(line -> Stream.of(line.split("[^a-zA-Z0-9]")))
-        .filter(word -> word.length() > 3)
-        .collect(groupingBy(identity(), counting()))
-        .entrySet()
-        .stream()
-        .sorted(comparingByValue(reverseOrder()))
-        .limit(10)
-        .collect(toMap(Map.Entry::getKey, Map.Entry::getValue));
+    for (String arg : args) {
+      String[] parts = arg.split("=", 2);
+      String key = parts[0];
+      if (key.startsWith("--")) {
+        key = key.substring(2);
+      } else {
+        key = key.substring(1);
+      }
+      String value = parts[1].trim();
+      parameters.put(key, value);
     }
-    catch (IOException e) {
-      throw new RuntimeException(e);
+
+    String directoryArg = parameters.get("directory");
+    String methodArg = parameters.get("method");
+    String limitArg = parameters.get("limit");
+
+    if (directoryArg == null || directoryArg.isEmpty()) {
+      LOGGER.error("No parameter value specified '-directory'");
+      return;
     }
-  }
+    if (methodArg == null || methodArg.isEmpty()) {
+      LOGGER.error("No parameter value specified '-method'");
+      return;
+    }
+    if (limitArg == null || limitArg.isEmpty()) {
+      LOGGER.error("No parameter value specified '-limit'");
+      return;
+    }
 
-  private static void testSearch() throws IOException {
-    System.out.println(naiveSearch("public"));
-  }
+    Path path = Path.of(directoryArg);
 
-  private static long naiveSearch(String query) throws IOException {
-    Document document = Jsoup //
-      .connect("https://www.google.com/search?q=" + query) //
-      .userAgent("Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.110 Safari/537.36 Viv/2.3.1440.48") //
-      .get();
+    WordsFinderEngine finder = WordsFinder.create(methodArg, Integer.parseInt(limitArg));
+    finder.find(path);
 
-    Element divResultStats = document.select("div#resultStats").first();
-    return Long.valueOf(divResultStats.text().replaceAll("[^0-9]", ""));
   }
 
 }
