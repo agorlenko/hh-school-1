@@ -2,6 +2,7 @@ package ru.hh.school.homework.tasks;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.hh.school.homework.FindPopularWordsResult;
 import ru.hh.school.homework.Launcher;
 import ru.hh.school.homework.WordsFinderEngine;
 
@@ -13,7 +14,11 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 public class FindPopularWords implements WordsFinderEngine {
 
@@ -29,22 +34,22 @@ public class FindPopularWords implements WordsFinderEngine {
 
     ExecutorService executorService = Executors.newCachedThreadPool();
 
-    List<Future<FindPopularWordsTask.Result>> findPopularWordsResults = new ArrayList<>();
+    List<Future<FindPopularWordsResult>> findPopularWordsResults = new ArrayList<>();
     List<Future<Long>> googleCountsResult = new ArrayList<>();
 
     DirectoryVisitor directoryVisitor = new DirectoryVisitor(executorService, findPopularWordsResults);
 
     ConcurrentHashMap<String, Long> counts = new ConcurrentHashMap<>();
-    List<FindPopularWordsTask.Result> results = new ArrayList<>();
+    List<FindPopularWordsResult> results = new ArrayList<>();
 
     try {
       Files.walkFileTree(path, directoryVisitor);
     } catch (IOException e) {
       LOGGER.error(e.getMessage(), e);
     }
-    for (Future<FindPopularWordsTask.Result> future : findPopularWordsResults) {
+    for (Future<FindPopularWordsResult> future : findPopularWordsResults) {
       try {
-        FindPopularWordsTask.Result currentResult = future.get();
+        FindPopularWordsResult currentResult = future.get();
         results.add(currentResult);
         for (String word : currentResult.getWords()) {
           googleCountsResult.add(executorService.submit(new GetGoogleCountsTask(word, counts)));
@@ -64,7 +69,7 @@ public class FindPopularWords implements WordsFinderEngine {
       }
     }
 
-    for (FindPopularWordsTask.Result result : results) {
+    for (FindPopularWordsResult result : results) {
       result.getWords().forEach(word -> System.out.println(String.format("Directory: %s, word: %s, google counts: %s",
               result.getDirectory(), word, counts.get(word.toLowerCase()))));
     }
@@ -74,9 +79,9 @@ public class FindPopularWords implements WordsFinderEngine {
   private class DirectoryVisitor extends SimpleFileVisitor<Path> {
 
     final ExecutorService executorService;
-    final List<Future<FindPopularWordsTask.Result>> results;
+    final List<Future<FindPopularWordsResult>> results;
 
-    DirectoryVisitor(ExecutorService executorService, List<Future<FindPopularWordsTask.Result>> results) {
+    DirectoryVisitor(ExecutorService executorService, List<Future<FindPopularWordsResult>> results) {
       this.executorService = executorService;
       this.results = results;
     }

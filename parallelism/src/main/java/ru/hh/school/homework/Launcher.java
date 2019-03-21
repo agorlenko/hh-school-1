@@ -1,6 +1,6 @@
 package ru.hh.school.homework;
 
-import java.nio.file.*;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 

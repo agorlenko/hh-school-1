@@ -2,27 +2,31 @@ package ru.hh.school.homework.cf;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.hh.school.homework.FindPopularWordsResult;
 import ru.hh.school.homework.util.FinderUtils;
 import ru.hh.school.homework.WordsFinderEngine;
 
 import java.io.IOException;
-import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import static java.util.Collections.reverseOrder;
 import static java.util.Map.Entry.comparingByValue;
-import static java.util.stream.Collectors.*;
+import static java.util.stream.Collectors.toList;
 
 public class CFExample implements WordsFinderEngine {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(CFExample.class);
   private final int limit;
-  private final List<Path> directories = new ArrayList<>();
   private final ConcurrentHashMap<String, Long> counts = new ConcurrentHashMap<>();
 
   public CFExample(int limit) {
@@ -32,35 +36,22 @@ public class CFExample implements WordsFinderEngine {
   @Override
   public void find(Path path) {
 
-    DirectoryVisitor directoryVisitor = new DirectoryVisitor();
-
-    directories.clear();
     counts.clear();
-    try {
-      Files.walkFileTree(path, directoryVisitor);
-    } catch (IOException e) {
-      LOGGER.error(e.getMessage(), e);
-    }
+    List<Path> directories = FinderUtils.getDirectories(path);
 
-    ExecutorService executorService = Executors.newCachedThreadPool();
-    CountDownLatch latch = new CountDownLatch(directories.size());
+    ExecutorService executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+    List<CompletableFuture<Void>> futures = new ArrayList<>();
     for (Path directory : directories) {
-      findPopularWords(directory, executorService)
-              .thenCompose(data -> getGoogleCounts(data, executorService))
-              .thenAccept(found -> {
-                for (String word : found.words) {
-                  LOGGER.info("Directory: {}, word: {}, google counts: {}", found.directory, word, counts.get(word.toLowerCase()));
-                }
-                latch.countDown();
-              });
+      futures.add(findPopularWords(directory, executorService)
+      .thenCompose(data -> getGoogleCounts(data, executorService))
+      .thenAccept(found -> {
+        for (String word : found.getWords()) {
+          LOGGER.info("Directory: {}, word: {}, google counts: {}", found.getDirectory(), word, counts.get(word.toLowerCase()));
+        }
+      }));
     }
 
-    try {
-      latch.await();
-    } catch (InterruptedException e) {
-      throw new RuntimeException("Interrupted during calculations", e);
-    }
-
+    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
     executorService.shutdown();
 
   }
@@ -93,13 +84,13 @@ public class CFExample implements WordsFinderEngine {
     CompletableFuture<FindPopularWordsResult> result = promise.thenApplyAsync(findResult -> {
       ExecutorService exec = Executors.newCachedThreadPool();
       List<CompletableFuture<Void>> futures = new ArrayList<>();
-      for (String word : findResult.words) {
+      for (String word : findResult.getWords()) {
         if (!counts.containsKey(word.toLowerCase())) {
           futures.add(CompletableFuture.supplyAsync(() -> {
             try {
               return FinderUtils.naiveSearch(word);
             } catch (IOException e) {
-              e.printStackTrace();
+              LOGGER.error(e.getMessage(), e);
               return 0L;
             }
           }, exec)
@@ -107,45 +98,11 @@ public class CFExample implements WordsFinderEngine {
         }
       }
       exec.shutdown();
-      futures.forEach(CompletableFuture::join);
+      CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
       return findResult;
     }, executorService);
     promise.complete(found);
     return result;
-  }
-
-  private class DirectoryVisitor extends SimpleFileVisitor<Path> {
-
-    @Override
-    public FileVisitResult preVisitDirectory(final Path path, final BasicFileAttributes attrs) {
-      if (attrs.isDirectory()) {
-        directories.add(path);
-      }
-      return FileVisitResult.CONTINUE;
-    }
-
-    @Override
-    public FileVisitResult visitFileFailed(final Path path, final IOException exc) {
-      LOGGER.error("Failed to process: " + path.toString()
-              + ". Reason: " + exc.toString());
-      return FileVisitResult.SKIP_SUBTREE;
-    }
-
-  }
-
-  private class FindPopularWordsResult {
-    private final Path directory;
-    private final List<String> words;
-
-    FindPopularWordsResult(Path directory, List<String> words) {
-      this.directory = directory;
-      this.words = words;
-    }
-
-    @Override
-    public String toString() {
-      return directory.toString() + ": " + words.toString();
-    }
   }
 
 }

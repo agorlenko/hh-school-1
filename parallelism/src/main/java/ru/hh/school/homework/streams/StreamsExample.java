@@ -2,17 +2,19 @@ package ru.hh.school.homework.streams;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.hh.school.homework.FindPopularWordsResult;
 import ru.hh.school.homework.util.FinderUtils;
 import ru.hh.school.homework.WordsFinderEngine;
 
 import java.io.IOException;
-import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.util.ArrayList;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.reverseOrder;
 import static java.util.Map.Entry.comparingByValue;
@@ -22,7 +24,6 @@ public class StreamsExample implements WordsFinderEngine {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(StreamsExample.class);
   private final int limit;
-  private final List<Path> directories = new ArrayList<>();
   private final ConcurrentHashMap<String, Long> counts = new ConcurrentHashMap<>();
 
   public StreamsExample(int limit) {
@@ -32,35 +33,19 @@ public class StreamsExample implements WordsFinderEngine {
   @Override
   public void find(Path path) {
 
-    DirectoryVisitor directoryVisitor = new DirectoryVisitor();
-
-    directories.clear();
     counts.clear();
-    try {
-      Files.walkFileTree(path, directoryVisitor);
-    } catch (IOException e) {
-      LOGGER.error(e.getMessage(), e);
-    }
+    List<Path> directories = FinderUtils.getDirectories(path);
 
-    ForkJoinPool forkJoinPool = new ForkJoinPool(1);
-
-    CountDownLatch latch = new CountDownLatch(directories.size());
-    forkJoinPool.submit(() ->
-            directories.parallelStream()
-                    .map(this::findPopularWords)
-                    .map(this::getGoogleCounts)
-                    .forEach(result -> {
-                      for (String word : result.words) {
-                        LOGGER.info("Directory: {}, word: {}, google counts: {}", result.directory, word, counts.get(word.toLowerCase()));
-                      }
-                      latch.countDown();
-                    }));
-    forkJoinPool.shutdown();
-    try {
-      latch.await();
-    } catch (InterruptedException e) {
-      throw new RuntimeException("Interrupted during calculations", e);
-    }
+    directories.parallelStream()
+            .map(this::findPopularWords)
+            .flatMap(result -> splitFindPopularWordsResult(result).stream())
+            .map(this::getGoogleCounts)
+            .distinct()
+            .forEach(result -> {
+              for (String word : result.getWords()) {
+                LOGGER.info("Directory: {}, word: {}, google counts: {}", result.getDirectory(), word, counts.get(word.toLowerCase()));
+              }
+            });
   }
 
   private FindPopularWordsResult findPopularWords(Path path) {
@@ -84,58 +69,31 @@ public class StreamsExample implements WordsFinderEngine {
       return new FindPopularWordsResult(path, popularWords);
   }
 
-  private FindPopularWordsResult getGoogleCounts(FindPopularWordsResult findResult) {
-      ExecutorService exec = Executors.newCachedThreadPool();
-      List<CompletableFuture<Void>> futures = new ArrayList<>();
-      for (String word : findResult.words) {
-        if (!counts.containsKey(word.toLowerCase())) {
-          futures.add(CompletableFuture.supplyAsync(() -> {
-            try {
-              return FinderUtils.naiveSearch(word);
-            } catch (IOException e) {
-              e.printStackTrace();
-              return 0L;
-            }
-          }, exec)
-          .thenAccept(count -> counts.put(word.toLowerCase(), count)));
-        }
+  private FindPopularWordsResult getGoogleCounts(WordResult wordResult) {
+    counts.computeIfAbsent(wordResult.word.toLowerCase(), k -> {
+      try {
+        return FinderUtils.naiveSearch(k);
+      } catch (IOException e) {
+        LOGGER.error(e.getMessage(), e);
+        return 0L;
       }
-      exec.shutdown();
-      futures.forEach(CompletableFuture::join);
-      return findResult;
+    });
+    return wordResult.findPopularWordsResult;
   }
 
-  private class DirectoryVisitor extends SimpleFileVisitor<Path> {
-
-    @Override
-    public FileVisitResult preVisitDirectory(final Path path, final BasicFileAttributes attrs) {
-      if (attrs.isDirectory()) {
-        directories.add(path);
-      }
-      return FileVisitResult.CONTINUE;
-    }
-
-    @Override
-    public FileVisitResult visitFileFailed(final Path path, final IOException exc) {
-      LOGGER.error("Failed to process: " + path.toString()
-              + ". Reason: " + exc.toString());
-      return FileVisitResult.SKIP_SUBTREE;
-    }
-
+  private List<WordResult> splitFindPopularWordsResult(FindPopularWordsResult findPopularWordsResult) {
+    return findPopularWordsResult.getWords()
+            .stream()
+            .map(w -> new WordResult(w, findPopularWordsResult))
+            .collect(Collectors.toList());
   }
 
-  private class FindPopularWordsResult {
-    private final Path directory;
-    private final List<String> words;
-
-    FindPopularWordsResult(Path directory, List<String> words) {
-      this.directory = directory;
-      this.words = words;
-    }
-
-    @Override
-    public String toString() {
-      return directory.toString() + ": " + words.toString();
+  private class WordResult {
+    private final String word;
+    private final FindPopularWordsResult findPopularWordsResult;
+    WordResult(String word, FindPopularWordsResult findPopularWordsResult) {
+      this.word = word;
+      this.findPopularWordsResult = findPopularWordsResult;
     }
   }
 

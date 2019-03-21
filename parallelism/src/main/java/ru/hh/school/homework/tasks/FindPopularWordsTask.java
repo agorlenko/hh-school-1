@@ -1,5 +1,6 @@
 package ru.hh.school.homework.tasks;
 
+import ru.hh.school.homework.FindPopularWordsResult;
 import ru.hh.school.homework.util.FinderUtils;
 
 import java.nio.file.DirectoryStream;
@@ -12,9 +13,9 @@ import java.util.concurrent.Callable;
 
 import static java.util.Collections.reverseOrder;
 import static java.util.Map.Entry.comparingByValue;
-import static java.util.stream.Collectors.*;
+import static java.util.stream.Collectors.toList;
 
-public class FindPopularWordsTask implements Callable<FindPopularWordsTask.Result> {
+public class FindPopularWordsTask implements Callable<FindPopularWordsResult> {
 
   private final Path directoryPath;
   private final int limit;
@@ -25,7 +26,7 @@ public class FindPopularWordsTask implements Callable<FindPopularWordsTask.Resul
   }
 
   @Override
-  public Result call() throws Exception {
+  public FindPopularWordsResult call() throws Exception {
 
     Map<String, Long> counter = new HashMap<>();
     try (DirectoryStream<Path> stream = Files.newDirectoryStream(directoryPath, "*.java")) {
@@ -41,30 +42,6 @@ public class FindPopularWordsTask implements Callable<FindPopularWordsTask.Resul
             .limit(limit)
             .map(HashMap.Entry::getKey)
             .collect(toList());
-    return new Result(directoryPath, popularWords);
+    return new FindPopularWordsResult(directoryPath, popularWords);
   }
-
-  public class Result {
-    private final Path directory;
-    private final List<String> words;
-
-    Result(Path directory, List<String> words) {
-      this.directory = directory;
-      this.words = words;
-    }
-
-    public Path getDirectory() {
-      return directory;
-    }
-
-    public List<String> getWords() {
-      return words;
-    }
-
-    @Override
-    public String toString() {
-      return directory.toString() + ": " + words.toString();
-    }
-  }
-
 }
