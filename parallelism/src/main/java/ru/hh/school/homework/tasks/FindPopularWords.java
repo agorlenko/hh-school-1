@@ -32,7 +32,7 @@ public class FindPopularWords implements WordsFinderEngine {
   @Override
   public void find(Path path) {
 
-    ExecutorService executorService = Executors.newCachedThreadPool();
+    ExecutorService executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
 
     List<Future<FindPopularWordsResult>> findPopularWordsResults = new ArrayList<>();
     List<Future<Long>> googleCountsResult = new ArrayList<>();
