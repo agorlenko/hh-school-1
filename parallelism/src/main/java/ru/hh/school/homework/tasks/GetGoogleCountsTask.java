@@ -5,7 +5,6 @@ import org.slf4j.LoggerFactory;
 import ru.hh.school.homework.Launcher;
 import ru.hh.school.homework.util.FinderUtils;
 
-import java.io.IOException;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -22,14 +21,7 @@ public class GetGoogleCountsTask implements Callable<Long> {
 
   @Override
   public Long call() {
-    return seen.computeIfAbsent(word.toLowerCase(), k -> {
-      try {
-        return FinderUtils.naiveSearch(k);
-      } catch (IOException e) {
-        LOGGER.error(e.getMessage(), e);
-        return 0L;
-      }
-    });
+    return seen.computeIfAbsent(word.toLowerCase(), k -> FinderUtils.naiveSearch(k));
   }
 
 }

@@ -6,19 +6,10 @@ import ru.hh.school.homework.FindPopularWordsResult;
 import ru.hh.school.homework.util.FinderUtils;
 import ru.hh.school.homework.WordsFinderEngine;
 
-import java.io.IOException;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
-
-import static java.util.Collections.reverseOrder;
-import static java.util.Map.Entry.comparingByValue;
-import static java.util.stream.Collectors.toList;
 
 public class StreamsExample implements WordsFinderEngine {
 
@@ -41,43 +32,15 @@ public class StreamsExample implements WordsFinderEngine {
             .flatMap(result -> splitFindPopularWordsResult(result).stream())
             .map(this::getGoogleCounts)
             .distinct()
-            .forEach(result -> {
-              for (String word : result.getWords()) {
-                LOGGER.info("Directory: {}, word: {}, google counts: {}", result.getDirectory(), word, counts.get(word.toLowerCase()));
-              }
-            });
+            .forEach(result -> FinderUtils.printResult(result, counts));
   }
 
   private FindPopularWordsResult findPopularWords(Path path) {
-
-      Map<String, Long> counter = new HashMap<>();
-      try (DirectoryStream<Path> stream = Files.newDirectoryStream(path, "*.java")) {
-        for (Path entry : stream) {
-          if (Files.isRegularFile(entry)) {
-            FinderUtils.naiveCount(entry).forEach((k, v) -> counter.merge(k, v, Long::sum));
-          }
-        }
-      } catch (IOException e) {
-        LOGGER.error(e.getMessage(), e);
-      }
-      List<String> popularWords = counter.entrySet()
-              .stream()
-              .sorted(comparingByValue(reverseOrder()))
-              .limit(limit)
-              .map(HashMap.Entry::getKey)
-              .collect(toList());
-      return new FindPopularWordsResult(path, popularWords);
+     return FinderUtils.getPopularWords(path, limit);
   }
 
   private FindPopularWordsResult getGoogleCounts(WordResult wordResult) {
-    counts.computeIfAbsent(wordResult.word.toLowerCase(), k -> {
-      try {
-        return FinderUtils.naiveSearch(k);
-      } catch (IOException e) {
-        LOGGER.error(e.getMessage(), e);
-        return 0L;
-      }
-    });
+    counts.computeIfAbsent(wordResult.word.toLowerCase(), k -> FinderUtils.naiveSearch(k));
     return wordResult.findPopularWordsResult;
   }
 

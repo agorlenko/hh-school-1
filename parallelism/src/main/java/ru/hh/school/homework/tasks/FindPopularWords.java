@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import ru.hh.school.homework.FindPopularWordsResult;
 import ru.hh.school.homework.Launcher;
 import ru.hh.school.homework.WordsFinderEngine;
+import ru.hh.school.homework.util.FinderUtils;
 
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
@@ -32,7 +33,7 @@ public class FindPopularWords implements WordsFinderEngine {
   @Override
   public void find(Path path) {
 
-    ExecutorService executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+    ExecutorService executorService = Executors.newCachedThreadPool();
 
     List<Future<FindPopularWordsResult>> findPopularWordsResults = new ArrayList<>();
     List<Future<Long>> googleCountsResult = new ArrayList<>();
@@ -48,32 +49,34 @@ public class FindPopularWords implements WordsFinderEngine {
       LOGGER.error(e.getMessage(), e);
     }
     for (Future<FindPopularWordsResult> future : findPopularWordsResults) {
-      try {
-        FindPopularWordsResult currentResult = future.get();
-        results.add(currentResult);
-        for (String word : currentResult.getWords()) {
-          googleCountsResult.add(executorService.submit(new GetGoogleCountsTask(word, counts)));
-        }
-      } catch (InterruptedException | ExecutionException e) {
-        LOGGER.error(e.getMessage(), e);
+      FindPopularWordsResult currentResult = getFuture(future);
+      results.add(currentResult);
+      for (String word : currentResult.getWords()) {
+        googleCountsResult.add(executorService.submit(new GetGoogleCountsTask(word, counts)));
       }
     }
 
     executorService.shutdown();
 
-    for (Future<Long> future : googleCountsResult) {
-      try {
-        future.get();
-      } catch (InterruptedException | ExecutionException e) {
-        LOGGER.error(e.getMessage(), e);
-      }
-    }
+    googleCountsResult.forEach(this::getFuture);
 
     for (FindPopularWordsResult result : results) {
-      result.getWords().forEach(word -> System.out.println(String.format("Directory: %s, word: %s, google counts: %s",
-              result.getDirectory(), word, counts.get(word.toLowerCase()))));
+      FinderUtils.printResult(result, counts);
     }
 
+  }
+
+  private <T> T getFuture(Future<T> future) {
+    try {
+      return future.get();
+    } catch (InterruptedException e) {
+      LOGGER.error(e.getMessage(), e);
+      Thread.currentThread().interrupt();
+      throw new RuntimeException(e);
+    } catch (ExecutionException e) {
+      LOGGER.error(e.getMessage(), e);
+      throw new RuntimeException(e);
+    }
   }
 
   private class DirectoryVisitor extends SimpleFileVisitor<Path> {
